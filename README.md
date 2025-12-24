@@ -1,110 +1,226 @@
-# FHEVM Hardhat Template
+# DarkPool
 
-A Hardhat-based template for developing Fully Homomorphic Encryption (FHE) enabled Solidity smart contracts using the
-FHEVM protocol by Zama.
+DarkPool is a privacy-first ETH staking application built on Zama FHEVM. Staked amounts are encrypted on-chain, locked
+by time, and only decrypted at withdrawal to return ETH and mint RewardCoin at a fixed rate of 1000 RWC per 1 ETH.
 
-## Quick Start
+## Overview
 
-For detailed instructions see:
-[FHEVM Hardhat Quick Start Tutorial](https://docs.zama.ai/protocol/solidity-guides/getting-started/quick-start-tutorial)
+DarkPool focuses on confidentiality, time-locked staking, and transparent reward logic without exposing user balances
+on-chain during the staking period.
 
-### Prerequisites
+## Problem Statement
 
-- **Node.js**: Version 20 or higher
-- **npm or yarn/pnpm**: Package manager
+Most staking contracts publicly reveal deposit amounts and balances. This makes it easy to infer user positions,
+strategies, and timing. DarkPool addresses this by encrypting stake amounts on-chain and only revealing the clear amount
+at the moment of withdrawal, while still enforcing lock times and deterministic reward issuance.
 
-### Installation
+## Solution Summary
 
-1. **Install dependencies**
+- Encrypt stake amounts with FHE (Fully Homomorphic Encryption) using Zama FHEVM.
+- Enforce a user-defined lock duration on-chain.
+- Decrypt only at withdrawal time using a verifiable decryption proof.
+- Mint confidential RewardCoin based on the clear ETH amount (1000 RWC per 1 ETH).
+
+## Key Features
+
+- Encrypted on-chain balances using `euint64`.
+- Time-locked staking with a single active position per address.
+- Two-step withdrawal flow: request (make decryptable) and finalize (verify proof).
+- Confidential reward token issuance using ERC7984.
+- Frontend reads with viem and writes with ethers for clarity and separation of concerns.
+
+## Advantages
+
+- Privacy by default: stake amounts are not visible during the lock period.
+- Trust-minimized decryption: withdrawal uses verifiable Zama proofs.
+- Clear reward economics: fixed, deterministic reward rate.
+- Simple user model: one active stake per address reduces edge cases.
+- No off-chain database required; state is fully on-chain.
+
+## How It Works
+
+### Stake Flow
+
+1. User chooses a lock duration in seconds.
+2. User sends ETH to `DarkPoolStaking.stake`.
+3. The contract encrypts the ETH amount into `euint64` and stores it.
+4. The encrypted amount is allowlisted for the contract and the user.
+
+### Withdraw Flow
+
+1. After the unlock time, user calls `requestWithdraw`.
+2. The contract marks the amount as publicly decryptable and stores a request mapping.
+3. A relayer obtains the decryption proof from Zama and calls `finalizeWithdraw`.
+4. The contract verifies the proof, returns ETH, and mints RewardCoin.
+
+### Reward Logic
+
+- Reward rate is constant: `REWARD_PER_ETH = 1000 * 1e6`.
+- Reward minting happens only at successful withdrawal finalization.
+- RewardCoin uses confidential balances (`ERC7984`) to avoid revealing holdings.
+
+## Smart Contracts
+
+### DarkPoolStaking
+
+Core staking contract that:
+
+- Accepts ETH and encrypts it to `euint64`.
+- Stores lock timestamps and withdrawal state.
+- Enforces unlock time before withdrawal.
+- Verifies Zama decryption proofs on finalize.
+- Transfers ETH back to the staker and mints RewardCoin.
+
+### RewardCoin
+
+Confidential ERC7984 token that:
+
+- Is minted by the staking contract only.
+- Encrypts balances using FHE.
+- Supports ownership and minter configuration.
+
+### FHECounter
+
+Legacy example contract from the original template. It is not used by DarkPool and is kept for reference only.
+
+## Technical Stack
+
+- Smart contracts: Solidity, Hardhat, hardhat-deploy, TypeChain
+- Confidential computing: Zama FHEVM (`@fhevm/solidity`), ERC7984
+- Frontend: React + Vite
+- Web3: viem (read), ethers (write), RainbowKit wallet UI
+- Relayer: `@zama-fhe/relayer-sdk`
+
+## Architecture Overview
+
+- On-chain state stores only encrypted stake amounts.
+- Time lock is stored as a clear timestamp.
+- Withdrawal finalization relies on Zama decryption proofs.
+- Reward token balances are confidential.
+
+## Project Structure
+
+```
+contracts/                Solidity contracts
+deploy/                   Hardhat deploy scripts
+deployments/              Deployment artifacts (ABI + addresses)
+docs/                     Zama docs used by this project
+tasks/                    Hardhat tasks
+test/                     Hardhat tests
+src/                      Frontend (React + Vite)
+```
+
+## Prerequisites
+
+- Node.js 20+
+- npm
+
+## Local Development (Contracts)
+
+1. Install dependencies (root project):
 
    ```bash
    npm install
    ```
 
-2. **Set up environment variables**
-
-   ```bash
-   npx hardhat vars set MNEMONIC
-
-   # Set your Infura API key for network access
-   npx hardhat vars set INFURA_API_KEY
-
-   # Optional: Set Etherscan API key for contract verification
-   npx hardhat vars set ETHERSCAN_API_KEY
-   ```
-
-3. **Compile and test**
+2. Compile and test:
 
    ```bash
    npm run compile
    npm run test
    ```
 
-4. **Deploy to local network**
+3. Run a local node and deploy (for contract testing only):
 
    ```bash
-   # Start a local FHEVM-ready node
-   npx hardhat node
-   # Deploy to local network
-   npx hardhat deploy --network localhost
+   npm run chain
+   npm run deploy:localhost
    ```
 
-5. **Deploy to Sepolia Testnet**
+## Deploy to Sepolia
+
+Deployment uses a private key and Infura API key. Do not use a mnemonic.
+
+1. Create a `.env` file in the project root:
 
    ```bash
-   # Deploy to Sepolia
-   npx hardhat deploy --network sepolia
-   # Verify contract on Etherscan
-   npx hardhat verify --network sepolia <CONTRACT_ADDRESS>
+   INFURA_API_KEY=your_infura_key
+   PRIVATE_KEY=your_private_key
    ```
 
-6. **Test on Sepolia Testnet**
+2. Run the full test suite, then deploy:
 
    ```bash
-   # Once deployed, you can run a simple test on Sepolia.
-   npx hardhat test --network sepolia
+   npm run test
+   npm run deploy:sepolia
    ```
 
-## 📁 Project Structure
+3. (Optional) verify:
 
-```
-fhevm-hardhat-template/
-├── contracts/           # Smart contract source files
-│   └── FHECounter.sol   # Example FHE counter contract
-├── deploy/              # Deployment scripts
-├── tasks/               # Hardhat custom tasks
-├── test/                # Test files
-├── hardhat.config.ts    # Hardhat configuration
-└── package.json         # Dependencies and scripts
-```
+   ```bash
+   npm run verify:sepolia -- <CONTRACT_ADDRESS>
+   ```
 
-## 📜 Available Scripts
+## Frontend Setup
 
-| Script             | Description              |
-| ------------------ | ------------------------ |
-| `npm run compile`  | Compile all contracts    |
-| `npm run test`     | Run all tests            |
-| `npm run coverage` | Generate coverage report |
-| `npm run lint`     | Run linting checks       |
-| `npm run clean`    | Clean build artifacts    |
+The frontend is located in `src/` and is a separate Vite project.
 
-## 📚 Documentation
+1. Install dependencies:
 
-- [FHEVM Documentation](https://docs.zama.ai/fhevm)
-- [FHEVM Hardhat Setup Guide](https://docs.zama.ai/protocol/solidity-guides/getting-started/setup)
-- [FHEVM Testing Guide](https://docs.zama.ai/protocol/solidity-guides/development-guide/hardhat/write_test)
-- [FHEVM Hardhat Plugin](https://docs.zama.ai/protocol/solidity-guides/development-guide/hardhat)
+   ```bash
+   cd src
+   npm install
+   ```
 
-## 📄 License
+2. Update contract addresses and ABIs:
 
-This project is licensed under the BSD-3-Clause-Clear License. See the [LICENSE](LICENSE) file for details.
+   - Copy the ABI from `deployments/sepolia` into `src/src/config/contracts.ts`.
+   - Set `STAKING_ADDRESS` and `REWARD_ADDRESS` in `src/src/config/contracts.ts`.
 
-## 🆘 Support
+3. Run the app:
 
-- **GitHub Issues**: [Report bugs or request features](https://github.com/zama-ai/fhevm/issues)
-- **Documentation**: [FHEVM Docs](https://docs.zama.ai)
-- **Community**: [Zama Discord](https://discord.gg/zama)
+   ```bash
+   npm run dev
+   ```
 
----
+Frontend constraints:
 
-**Built with ❤️ by the Zama team**
+- No localhost RPC networks; the UI targets Sepolia only.
+- No environment variables or localStorage usage in the frontend.
+- No `.json` files inside the frontend; ABIs are embedded in TypeScript.
+
+## Scripts (Root)
+
+Common contract scripts:
+
+- `npm run compile`
+- `npm run test`
+- `npm run deploy:localhost`
+- `npm run deploy:sepolia`
+- `npm run verify:sepolia`
+
+## Operational Notes
+
+- Only one active stake is allowed per address.
+- Stake amounts are limited to `uint64` (FHE type constraints).
+- The contract rejects direct ETH transfers via `receive`.
+- Withdrawal finalization depends on the availability of the Zama relayer.
+
+## Documentation References
+
+- `docs/zama_llm.md` for contract integration guidance
+- `docs/zama_doc_relayer.md` for relayer usage in the frontend
+
+## Future Roadmap
+
+- Support multiple concurrent stakes per address.
+- Partial withdrawals with proportional rewards.
+- Configurable reward rate governance with timelocks.
+- Better relayer resilience and fallback strategies.
+- Security audit and formal verification of withdrawal flow.
+- Cross-chain deployment and unified UI for multiple networks.
+- UX improvements for decryption status and proof progress.
+
+## License
+
+BSD-3-Clause-Clear. See `LICENSE`.
